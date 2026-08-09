@@ -1,50 +1,58 @@
 import 'dotenv/config';
+import { createHmac, timingSafeEqual } from 'crypto';
 import express from 'express';
 import {
-  ButtonStyleTypes,
   InteractionResponseFlags,
   InteractionResponseType,
   InteractionType,
   MessageComponentTypes,
   verifyKeyMiddleware,
 } from 'discord-interactions';
+import rateLimit from 'express-rate-limit';
 
-import { addScore,getTopScores,getRank,formatTime } from './db.js';
+import { addScore, getTopScores, getRank, formatTime } from './db.js';
 import { getRandomEmoji, DiscordRequest } from './utils.js';
-import { getShuffledOptions, getResult } from './game.js';
 
-// Create an express app
 const app = express();
-// Get port, or default to 3000
 const PORT = process.env.PORT || 3000;
-// To keep track of our active games
-const activeGames = {};
 
-/**
- * Interactions endpoint URL where Discord will send HTTP requests
- * Parse request body and verifies incoming requests using discord-interactions package
- */
+const scoreLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+function escapeHtml(str) {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function verifyScoreSignature(player, timeMs, timestamp, signature) {
+  const expected = createHmac('sha256', process.env.SCORE_SECRET)
+    .update(`${player}:${timeMs}:${timestamp}`)
+    .digest('hex');
+  try {
+    return timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expected, 'hex'));
+  } catch {
+    return false;
+  }
+}
+
 app.post('/interactions', verifyKeyMiddleware(process.env.PUBLIC_KEY), async function (req, res) {
-  // Interaction id, type and data
-  const { id, type, data } = req.body;
+  const { type, data } = req.body;
 
-  /**
-   * Handle verification requests
-   */
   if (type === InteractionType.PING) {
     return res.send({ type: InteractionResponseType.PONG });
   }
 
-  /**
-   * Handle slash command requests
-   * See https://discord.com/developers/docs/interactions/application-commands#slash-commands
-   */
   if (type === InteractionType.APPLICATION_COMMAND) {
     const { name } = data;
 
-    // "test" command
     if (name === 'test') {
-      // Send a message into the channel where command was triggered from
       return res.send({
         type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
         data: {
@@ -52,19 +60,18 @@ app.post('/interactions', verifyKeyMiddleware(process.env.PUBLIC_KEY), async fun
           components: [
             {
               type: MessageComponentTypes.TEXT_DISPLAY,
-              // Fetches a random emoji to send from a helper function
-              content: `hello world ${getRandomEmoji()}`
-            }
-          ]
+              content: `hello world ${getRandomEmoji()}`,
+            },
+          ],
         },
       });
     }
 
     if (name === 'leaderboard') {
-      const topScores = getTopScores(10);
-      const lines = topScores.length ? 
-        topScores.map((rank, index) => `**${index + 1}** ${rank.player} - ${formatTime(rank.time)}`).join('\n')
-        : 'No scores yet!'
+      const topScores = await getTopScores(10);
+      const lines = topScores.length
+        ? topScores.map((s, i) => `**${i + 1}** ${s.player} - ${formatTime(s.time)}`).join('\n')
+        : 'No scores yet!';
       return res.send({
         type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
         data: { content: `**Leaderboard**\n${lines}` },
@@ -80,9 +87,8 @@ app.post('/interactions', verifyKeyMiddleware(process.env.PUBLIC_KEY), async fun
 });
 
 async function postNewScore(player, timeMs) {
-  const channelID = process.env.CHANNEL_ID;
-  const rank = getRank(timeMs);
-  await DiscordRequest(`channels/${channelID}/messages`, {
+  const rank = await getRank(timeMs);
+  await DiscordRequest(`channels/${process.env.CHANNEL_ID}/messages`, {
     method: 'POST',
     body: {
       content: `**Player ${player}** just survived for **${formatTime(timeMs)}** and is now ranked **#${rank}** on the leaderboard!`,
@@ -90,24 +96,90 @@ async function postNewScore(player, timeMs) {
   });
 }
 
-app.post('/score', express.json(), async (req, res) => {
-  const { player, timeMs, secret } = req.body;
+app.get('/leaderboard', async (_req, res) => {
+  const topScores = await getTopScores(10);
+  const rows = topScores.length
+    ? topScores
+        .map(
+          (s, i) => `
+        <tr class="${i === 0 ? 'gold' : ''}">
+          <td class="rank">#${i + 1}</td>
+          <td>${escapeHtml(s.player)}</td>
+          <td class="time">${formatTime(s.time)}</td>
+        </tr>`
+        )
+        .join('')
+    : '<tr><td colspan="3" class="empty">No scores yet!</td></tr>';
 
-  if (secret !== process.env.SCORE_SECRET) {
-    return res.status(401).json({ error: 'unauthorized' });
-  }
-  if (typeof player !== 'string' || player.length > 100 || typeof timeMs !== 'number') {
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Leaderboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #e0e0e0; display: flex; justify-content: center; padding: 40px 16px; margin: 0; min-height: 100vh; }
+    .card { background: #16213e; border-radius: 12px; padding: 32px; width: 100%; max-width: 520px; height: fit-content; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+    h1 { margin: 0 0 24px; font-size: 1.4rem; color: #7289da; letter-spacing: 0.05em; text-transform: uppercase; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; color: #72767d; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; padding: 0 8px 10px; border-bottom: 1px solid #2d3561; }
+    th:last-child { text-align: right; }
+    td { padding: 13px 8px; border-bottom: 1px solid #1e2a4a; font-size: 0.95rem; }
+    tr:last-child td { border-bottom: none; }
+    .rank { color: #72767d; width: 44px; font-variant-numeric: tabular-nums; }
+    .time { color: #7289da; text-align: right; font-variant-numeric: tabular-nums; font-family: monospace; font-size: 0.9rem; }
+    tr.gold td { color: #faa61a; }
+    tr.gold .rank { color: #faa61a; }
+    .empty { text-align: center; color: #72767d; padding: 32px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Leaderboard</h1>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Player</th>
+          <th>Time</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>
+</body>
+</html>`);
+});
+
+app.post('/score', scoreLimiter, express.json(), async (req, res) => {
+  const { player, timeMs, timestamp, signature } = req.body;
+
+  if (
+    typeof player !== 'string' ||
+    player.length > 100 ||
+    typeof timeMs !== 'number' ||
+    typeof timestamp !== 'number' ||
+    typeof signature !== 'string'
+  ) {
     return res.status(400).json({ error: 'invalid request body' });
   }
 
-  addScore(player, timeMs);
+  if (Math.abs(Date.now() - timestamp) > 30_000) {
+    return res.status(401).json({ error: 'timestamp expired' });
+  }
+
+  if (!verifyScoreSignature(player, timeMs, timestamp, signature)) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+
+  await addScore(player, timeMs);
   try {
     await postNewScore(player, timeMs);
   } catch (err) {
     console.error('Failed to post score announcement:', err);
   }
   return res.status(200).json({ success: true });
-
 });
 
 app.listen(PORT, () => {
