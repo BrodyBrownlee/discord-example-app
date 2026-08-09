@@ -3,15 +3,15 @@
   "private": true,
   "version": "1.0.0",
   "description": "Discord example app",
-  "main": "app.js",
+  "main": "src/api/app.js",
   "type": "module",
   "engines": {
     "node": ">=18.x"
   },
   "scripts": {
-    "start": "node app.js",
-    "register": "node commands.js",
-    "dev": "nodemon app.js"
+    "start": "node src/api/app.js",
+    "register": "node src/commands/commands.js",
+    "dev": "nodemon src/api/app.js"
   },
   "author": "Shay DeWael",
   "license": "MIT",

@@ -1,108 +1,152 @@
-# Getting Started app for Discord
+# Discord Leaderboard Bot
 
-This project contains a basic rock-paper-scissors-style Discord app written in JavaScript, built for the [getting started guide](https://discord.com/developers/docs/getting-started).
+A Discord bot with a live leaderboard scoring system. Players submit scores from an external game client; the bot tracks rankings in Supabase and announces results in a Discord channel. Includes slash commands for viewing the leaderboard directly in Discord, plus a hosted web leaderboard page.
 
-![Demo of app](https://github.com/discord/discord-example-app/raw/main/assets/getting-started-demo.gif?raw=true)
+Also includes a full set of standalone example files covering common Discord interaction patterns (buttons, modals, select menus, and a complete Rock-Paper-Scissors game).
 
 ## Project structure
-Below is a basic overview of the project structure:
 
 ```
-├── examples    -> short, feature-specific sample apps
-│   ├── app.js  -> finished app.js code
-│   ├── button.js
-│   ├── command.js
-│   ├── modal.js
-│   ├── selectMenu.js
-├── .env.sample -> sample .env file
-├── app.js      -> main entrypoint for app
-├── commands.js -> slash command payloads + helpers
-├── game.js     -> logic specific to RPS
-├── utils.js    -> utility functions and enums
+discord-example-app/
+│
+├── src/                        Production source code
+│   ├── api/
+│   │   ├── app.js              Main Express server — all HTTP endpoints
+│   │   └── README.md           API endpoint documentation
+│   │
+│   ├── commands/
+│   │   ├── commands.js         Slash command definitions + Discord registration script
+│   │   └── README.md           How to add and register commands
+│   │
+│   ├── database/
+│   │   ├── db.js               Supabase client + score CRUD operations
+│   │   └── README.md           Schema, functions, and setup notes
+│   │
+│   └── utils/
+│       ├── utils.js            Discord API client + shared helpers
+│       └── README.md           Function reference
+│
+├── examples/                   Standalone feature demonstrations (not production)
+│   ├── app.js                  Complete Rock-Paper-Scissors game
+│   ├── button.js               Button interaction example
+│   ├── command.js              Slash command registration example
+│   ├── modal.js                Modal form example
+│   ├── selectMenu.js           String select menu example
+│   └── README.md               Guide to the examples
+│
+├── game.js                     RPS game logic (used by examples/app.js)
+├── assets/                     Images for documentation
+├── .env.sample                 Required environment variable template
 ├── package.json
-├── README.md
-└── .gitignore
+└── README.md                   ← You are here
 ```
 
-## Running app locally
+## Quick start
 
-Before you start, you'll need to install [NodeJS](https://nodejs.org/en/download/) and [create a Discord app](https://discord.com/developers/applications) with the proper permissions:
-- `applications.commands`
-- `bot` (with Send Messages enabled)
+### 1. Prerequisites
 
+- [Node.js](https://nodejs.org/) v18 or later
+- A [Discord application](https://discord.com/developers/applications) with:
+  - `applications.commands` scope
+  - `bot` scope with **Send Messages** permission
+- A [Supabase](https://supabase.com) project with a `scores` table (see [Database setup](#database-setup))
 
-Configuring the app is covered in detail in the [getting started guide](https://discord.com/developers/docs/getting-started).
+### 2. Install dependencies
 
-### Setup project
-
-First clone the project:
-```
-git clone https://github.com/discord/discord-example-app.git
-```
-
-Then navigate to its directory and install dependencies:
-```
-cd discord-example-app
+```bash
 npm install
 ```
-### Get app credentials
 
-Fetch the credentials from your app's settings and add them to a `.env` file (see `.env.sample` for an example). You'll need your app ID (`APP_ID`), bot token (`DISCORD_TOKEN`), and public key (`PUBLIC_KEY`).
+### 3. Configure environment
 
-Fetching credentials is covered in detail in the [getting started guide](https://discord.com/developers/docs/getting-started).
-
-> 🔑 Environment variables can be added to the `.env` file in Glitch or when developing locally, and in the Secrets tab in Replit (the lock icon on the left).
-
-### Install slash commands
-
-The commands for the example app are set up in `commands.js`. All of the commands in the `ALL_COMMANDS` array at the bottom of `commands.js` will be installed when you run the `register` command configured in `package.json`:
+Copy `.env.sample` to `.env` and fill in your values:
 
 ```
+APP_ID                   Discord application ID
+DISCORD_TOKEN            Bot token (keep secret)
+PUBLIC_KEY               Discord public key (for request verification)
+CHANNEL_ID               Channel where score announcements are posted
+SCORE_SECRET             Random hex string used to sign score submissions
+SUPABASE_URL             Your Supabase project URL
+SUPABASE_SERVICE_ROLE_KEY  Supabase service role key (server-side only)
+```
+
+### 4. Register slash commands
+
+```bash
 npm run register
 ```
 
-### Run the app
+Global commands can take up to an hour to appear in Discord.
 
-After your credentials are added, go ahead and run the app:
+### 5. Start the server
 
+```bash
+npm start          # production
+npm run dev        # development (auto-restarts on file changes)
 ```
-node app.js
-```
 
-> ⚙️ A package [like `nodemon`](https://github.com/remy/nodemon), which watches for local changes and restarts your app, may be helpful while locally developing.
+The server listens on port `3000` by default (override with `PORT` env var).
 
-If you aren't following the [getting started guide](https://discord.com/developers/docs/getting-started), you can move the contents of `examples/app.js` (the finished `app.js` file) to the top-level `app.js`.
+### 6. Expose your local server
 
-### Set up interactivity
+Discord needs a public HTTPS URL to deliver interactions. Use [ngrok](https://ngrok.com/) during development:
 
-The project needs a public endpoint where Discord can send requests. To develop and test locally, you can use something like [`ngrok`](https://ngrok.com/) to tunnel HTTP traffic.
-
-Install ngrok if you haven't already, then start listening on port `3000`:
-
-```
+```bash
 ngrok http 3000
 ```
 
-You should see your connection open:
+Copy the `https://...ngrok.io` URL, then in your Discord app settings set:
 
+**Interactions Endpoint URL** → `https://your-ngrok-url.ngrok.io/interactions`
+
+## Database setup
+
+Create a `scores` table in your Supabase project:
+
+```sql
+CREATE TABLE scores (
+  id         serial  PRIMARY KEY,
+  player     text    NOT NULL,
+  time       integer NOT NULL,
+  created_at bigint  NOT NULL
+);
 ```
-Tunnel Status                 online
-Version                       2.0/2.0
-Web Interface                 http://127.0.0.1:4040
-Forwarding                    https://1234-someurl.ngrok.io -> localhost:3000
 
-Connections                  ttl     opn     rt1     rt5     p50     p90
-                              0       0       0.00    0.00    0.00    0.00
+## Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/interactions` | Discord webhook — handles slash commands |
+| `GET` | `/leaderboard` | Rendered HTML leaderboard page |
+| `POST` | `/score` | Score submission from game client |
+
+## Slash commands
+
+| Command | Description | Availability |
+|---|---|---|
+| `/test` | Returns a random emoji | Everywhere |
+| `/leaderboard` | Shows the top 10 scores | Guild channels only |
+
+## Score submission
+
+The game client must `POST /score` with a valid HMAC-SHA256 signature to submit a score. The signature covers `"player:timeMs:timestamp"` using `SCORE_SECRET`.
+
+```json
+{
+  "player": "PlayerName",
+  "timeMs": 65321,
+  "timestamp": 1700000000000,
+  "signature": "<hmac-sha256-hex>"
+}
 ```
 
-Copy the forwarding address that starts with `https`, in this case `https://1234-someurl.ngrok.io`, then go to your [app's settings](https://discord.com/developers/applications).
+Security measures: rate limiting (10/min/IP), timestamp replay prevention (±30s window), and HMAC signature verification.
 
-On the **General Information** tab, there will be an **Interactions Endpoint URL**. Paste your ngrok address there, and append `/interactions` to it (`https://1234-someurl.ngrok.io/interactions` in the example).
+## Further reading
 
-Click **Save Changes**, and your app should be ready to run 🚀
-
-## Other resources
-- Read **[the documentation](https://discord.com/developers/docs/intro)** for in-depth information about API features.
-- Browse the `examples/` folder in this project for smaller, feature-specific code examples
-- Join the **[Discord Developers server](https://discord.gg/discord-developers)** to ask questions about the API, attend events hosted by the Discord API team, and interact with other devs.
-- Check out **[community resources](https://discord.com/developers/docs/topics/community-resources#community-resources)** for language-specific tools maintained by community members.
+- [Discord Developer Documentation](https://discord.com/developers/docs/intro)
+- [Discord Developers server](https://discord.gg/discord-developers)
+- [`examples/`](./examples/README.md) — feature-specific code samples
+- [`src/api/`](./src/api/README.md) — endpoint details
+- [`src/database/`](./src/database/README.md) — database schema and functions
