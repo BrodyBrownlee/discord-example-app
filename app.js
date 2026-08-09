@@ -8,6 +8,8 @@ import {
   MessageComponentTypes,
   verifyKeyMiddleware,
 } from 'discord-interactions';
+
+import { addScore,getTopScores,getRank,formatTime } from './db.js';
 import { getRandomEmoji, DiscordRequest } from './utils.js';
 import { getShuffledOptions, getResult } from './game.js';
 
@@ -58,12 +60,54 @@ app.post('/interactions', verifyKeyMiddleware(process.env.PUBLIC_KEY), async fun
       });
     }
 
+    if (name === 'leaderboard') {
+      const topScores = getTopScores(10);
+      const lines = topScores.length ? 
+        topScores.map((rank, index) => `**${index + 1}** ${rank.player} - ${formatTime(rank.time)}`).join('\n')
+        : 'No scores yet!'
+      return res.send({
+        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+        data: { content: `**Leaderboard**\n${lines}` },
+      });
+    }
+
     console.error(`unknown command: ${name}`);
     return res.status(400).json({ error: 'unknown command' });
   }
 
   console.error('unknown interaction type', type);
   return res.status(400).json({ error: 'unknown interaction type' });
+});
+
+async function postNewScore(player, timeMs) {
+  const channelID = process.env.CHANNEL_ID;
+  const rank = getRank(timeMs);
+  await DiscordRequest(`channels/${channelID}/messages`, {
+    method: 'POST',
+    body: {
+      content: `**Player ${player}** just survived for **${formatTime(timeMs)}** and is now ranked **#${rank}** on the leaderboard!`,
+    },
+  });
+}
+
+app.post('/score', express.json(), async (req, res) => {
+  const { player, timeMs, secret } = req.body;
+
+  if (secret !== process.env.SCORE_SECRET) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  if (typeof player !== 'string' || player.length > 100 || typeof timeMs !== 'number') {
+    return res.status(400).json({ error: 'invalid request body' });
+  }
+
+  addScore(player, timeMs);
+  try {
+    await postNewScore(player, timeMs);
+  } catch (err) {
+    console.error('Failed to post score announcement:', err);
+  }
+  return res.status(200).json({ success: true });
+
 });
 
 app.listen(PORT, () => {
