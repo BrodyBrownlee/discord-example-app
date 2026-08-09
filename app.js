@@ -43,7 +43,7 @@ function verifyScoreSignature(player, timeMs, timestamp, signature) {
 }
 
 app.post('/interactions', verifyKeyMiddleware(process.env.PUBLIC_KEY), async function (req, res) {
-  const { type, data } = req.body;
+  const { type, data, token } = req.body;
 
   if (type === InteractionType.PING) {
     return res.send({ type: InteractionResponseType.PONG });
@@ -68,14 +68,19 @@ app.post('/interactions', verifyKeyMiddleware(process.env.PUBLIC_KEY), async fun
     }
 
     if (name === 'leaderboard') {
+      // Acknowledge immediately so Discord doesn't time out, then follow up
+      res.send({ type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE });
+
       const topScores = await getTopScores(10);
       const lines = topScores.length
         ? topScores.map((s, i) => `**${i + 1}** ${s.player} - ${formatTime(s.time)}`).join('\n')
         : 'No scores yet!';
-      return res.send({
-        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-        data: { content: `**Leaderboard**\n${lines}` },
+
+      await DiscordRequest(`webhooks/${process.env.APP_ID}/${token}/messages/@original`, {
+        method: 'PATCH',
+        body: { content: `**Leaderboard**\n${lines}` },
       });
+      return;
     }
 
     console.error(`unknown command: ${name}`);
